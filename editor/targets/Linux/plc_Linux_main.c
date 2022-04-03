@@ -30,7 +30,7 @@ void PLC_GetTime(IEC_TIME *CURRENT_TIME)
     CURRENT_TIME->tv_nsec = tmp.tv_nsec;
 }
 
-void PLC_timer_notify(sigval_t val)
+void PLC_timer_notify(union sigval val)
 {
     PLC_GetTime(&__CURRENT_TIME);
     sem_post(&Run_PLC);
