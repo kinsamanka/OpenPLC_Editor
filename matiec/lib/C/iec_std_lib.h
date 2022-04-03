@@ -389,7 +389,7 @@ static inline TIME __time_mul(TIME IN1, LREAL IN2){
   time_t s = (time_t)s_f;
   div_t ns = div((int)((LREAL)IN1.tv_nsec * IN2), 1000000000);
   TIME res = {(long)s + ns.quot,
-		      (long)ns.rem + (s_f - s) * 1000000000 };
+		      (long)ns.rem + (long)((s_f - s) * 1000000000) };
   __normalize_timespec(&res);
   return res;
 }
@@ -547,7 +547,7 @@ static inline LREAL __string_to_real(STRING IN) {
     /*   TO_TIME   */
     /***************/
 static inline TIME    __int_to_time(LINT IN)  {return (TIME){IN, 0};}
-static inline TIME   __real_to_time(LREAL IN) {return (TIME){IN, (IN - (LINT)IN) * 1000000000};}
+static inline TIME   __real_to_time(LREAL IN) {return (TIME){(LINT)IN, (LINT)((IN - (LINT)IN) * 1000000000)};}
 static inline TIME __string_to_time(STRING IN){
     __strlen_t l;
     /* TODO :
