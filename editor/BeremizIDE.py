@@ -69,6 +69,7 @@ from plcopen.types_enums import \
     ITEM_CONFNODE
 
 from ProjectController import ProjectController, GetAddMenuItems, MATIEC_ERROR_MODEL
+from Uploader import BoardUploader
 
 from IDEFrame import \
     TITLE,\
@@ -458,6 +459,8 @@ class Beremiz(IDEFrame):
         IDEFrame.__init__(self, parent, debug)
         self.Log = LogPseudoFile(self.LogConsole, self.SelectTab)
 
+        self.uploader = BoardUploader(self.Log, authkey=b'openplc')
+
         self.local_runtime = None
         self.runtime_port = None
         self.local_runtime_tmpdir = None
@@ -487,7 +490,7 @@ class Beremiz(IDEFrame):
             projectOpen = DecodeFileSystemPath(projectOpen, False)
 
         if projectOpen is not None and os.path.isdir(projectOpen):
-            self.CTR = ProjectController(self, self.Log)
+            self.CTR = ProjectController(self, self.Log, self.uploader)
             self.Controler = self.CTR
             result, _err = self.CTR.LoadProject(projectOpen, buildpath)
             if not result:
@@ -905,7 +908,7 @@ class Beremiz(IDEFrame):
                               EncodeFileSystemPath(os.path.dirname(projectpath)))
             self.Config.Flush()
             self.ResetView()
-            ctr = ProjectController(self, self.Log)
+            ctr = ProjectController(self, self.Log, self.uploader)
             result = ctr.NewProject(projectpath)
             if not result:
                 self.CTR = ctr
@@ -946,7 +949,7 @@ class Beremiz(IDEFrame):
                               EncodeFileSystemPath(os.path.dirname(projectpath)))
             self.Config.Flush()
             self.ResetView()
-            self.CTR = ProjectController(self, self.Log)
+            self.CTR = ProjectController(self, self.Log, self.uploader)
             self.Controler = self.CTR
             result, err = self.CTR.LoadProject(projectpath)
             if not result:

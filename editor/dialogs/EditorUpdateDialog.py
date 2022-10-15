@@ -9,7 +9,6 @@ import platform
 from subprocess import check_output
 
 import wx
-import wx.xrc
 import os
 
 # -------------------------------------------------------------------------------

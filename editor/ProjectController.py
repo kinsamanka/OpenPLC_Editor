@@ -58,7 +58,7 @@ from editors.FileManagementPanel import FileManagementPanel
 from editors.ProjectNodeEditor import ProjectNodeEditor
 from editors.IECCodeViewer import IECCodeViewer
 from editors.DebugViewer import DebugViewer, REFRESH_PERIOD
-from dialogs import UriEditor, IDManager, ArduinoUploadDialog
+from dialogs import IDManager
 from PLCControler import PLCControler
 from plcopen.structures import IEC_KEYWORDS
 from plcopen.types_enums import ComputeConfigurationResourceName, ITEM_CONFNODE
@@ -119,7 +119,7 @@ class Iec2CSettings(object):
     def findCmd(self):
         cmd = "iec2c" + (".exe" if wx.Platform == '__WXMSW__' else "")
         paths = [
-            os.path.join(base_folder, "matiec")
+            os.path.join(base_folder, 'builder', 'lib', "matiec", "bin")
         ]
         path = self.findObject(
             paths, lambda p: os.path.isfile(os.path.join(p, cmd)))
@@ -132,7 +132,7 @@ class Iec2CSettings(object):
 
     def findLibPath(self):
         paths = [
-            os.path.join(base_folder, "matiec", "lib"),
+            os.path.join(base_folder, 'builder', 'lib', "matiec", "lib"),
             "/usr/lib/matiec"
         ]
         path = self.findObject(
@@ -240,7 +240,7 @@ class ProjectController(ConfigTreeNode, PLCControler):
     EditorType = ProjectNodeEditor
     iec2c_cfg = None
 
-    def __init__(self, frame, logger):
+    def __init__(self, frame, logger, uploader):
         PLCControler.__init__(self)
         ConfigTreeNode.__init__(self)
 
@@ -282,6 +282,8 @@ class ProjectController(ConfigTreeNode, PLCControler):
 
         self.IECcodeDigest = None
         self.LastBuiltIECcodeDigest = None
+
+        self.uploader = uploader
 
     def __del__(self):
         self.KillDebugThread()
@@ -912,8 +914,6 @@ class ProjectController(ConfigTreeNode, PLCControler):
         # Now extract C files of stdout
         C_files = [fname for fname in result.splitlines() if fname[
             -2:] == ".c" or fname[-2:] == ".C"]
-        # remove those that are not to be compiled because included by others
-        C_files.remove("POUS.c")
         if not C_files:
             self.logger.write_error(
                 _("Error : At least one configuration and one resource must be declared in PLC !\n"))
@@ -1512,7 +1512,7 @@ class ProjectController(ConfigTreeNode, PLCControler):
         "_Repair": False,
         "_Disconnect": False,
         "_generateOpenPLC": True,
-        "_generateArduino": True
+        "_uploadBoard": True
     }
 
     MethodsFromStatus = {
@@ -1521,14 +1521,14 @@ class ProjectController(ConfigTreeNode, PLCControler):
                                  "_Connect": False,
                                  "_Disconnect": False,
                                  "_generateOpenPLC": True,
-                                 "_generateArduino": True},
+                                 "_uploadBoard": True},
         PlcStatus.Stopped:      {"_Run": True,
                                  "_Transfer": False,
                                  "_Connect": False,
                                  "_Disconnect": False,
                                  "_Repair": False,
                                  "_generateOpenPLC": True,
-                                 "_generateArduino": True},
+                                 "_uploadBoard": True},
         PlcStatus.Empty:        {"_Transfer": False,
                                  "_Connect": False,
                                  "_Disconnect": True},
@@ -2087,15 +2087,11 @@ class ProjectController(ConfigTreeNode, PLCControler):
                     self.logger.write("OpenPLC program generated successfully\n")
                 except:
                     self.logger.write_error('It was not possible to save the generated program\n')
-    
-    def _generateArduino(self):
+
+    def _uploadBoard(self):
         self._Clean()
-        if (self._Build() is True):
-            f = open(self._getIECgeneratedcodepath(), 'r')
-            program = f.read()
-            f.close()
-            dialog = ArduinoUploadDialog.ArduinoUploadDialog(self.AppFrame, program)
-            dialog.ShowModal()
+        if self._Build():
+            self.uploader.upload(self._getIECgeneratedcodepath())
 
     StatusMethods = [
         {
@@ -2177,10 +2173,10 @@ class ProjectController(ConfigTreeNode, PLCControler):
             "shown":      True,
         },
         {
-            "bitmap":    "arduino",
-            "name":    _("Upload Arduino"),
-            "tooltip": _("Upload program to Arduino Board"),
-            "method":   "_generateArduino",
+            "bitmap":    "uploader",
+            "name":    _("Upload Program"),
+            "tooltip": _("Upload program to Target Board"),
+            "method":   "_uploadBoard",
             "shown":      True,
         },
     ]
