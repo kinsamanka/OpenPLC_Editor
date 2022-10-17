@@ -1,4 +1,4 @@
 [submodule "builder"]
 	path = builder
-	url = https://github.com/kinsamanka/openplc-pio-arduino.git
+	url = https://github.com/kinsamanka/openplc-uploader.git
 	shallow = true
