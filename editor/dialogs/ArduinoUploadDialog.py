@@ -13,11 +13,11 @@ import time
 import os
 import json
 import time
+import glob
 
 # -------------------------------------------------------------------------------
 #                            Arduino Upload Dialog
 # -------------------------------------------------------------------------------
-
 
 class ArduinoUploadDialog(wx.Dialog):
     """Dialog to configure upload parameters"""
@@ -33,9 +33,16 @@ class ArduinoUploadDialog(wx.Dialog):
         self.update_subsystem = True
 
         if os.name == 'nt':
-            wx.Dialog.__init__ ( self, parent, id = wx.ID_ANY, title = u"Upload to Arduino Board", pos = wx.DefaultPosition, size = wx.Size( 400,600 ), style = wx.DEFAULT_DIALOG_STYLE )
+            wx.Dialog.__init__ ( self, parent, id = wx.ID_ANY, title = u"Upload to Arduino Board", pos = wx.DefaultPosition, size = wx.Size( 400,640 ), style = wx.DEFAULT_DIALOG_STYLE )
         else:
-            wx.Dialog.__init__ ( self, parent, id = wx.ID_ANY, title = u"Upload to Arduino Board", pos = wx.DefaultPosition, size = wx.Size( 480,780 ), style = wx.DEFAULT_DIALOG_STYLE )
+            wx.Dialog.__init__ ( self, parent, id = wx.ID_ANY, title = u"Upload to Arduino Board", pos = wx.DefaultPosition, size = wx.Size( 480,820 ), style = wx.DEFAULT_DIALOG_STYLE )
+
+        # load Hals automatically and initialize the board_type_comboChoices
+        self.loadHals()
+        board_type_comboChoices = []
+        for board in self.hals:
+            board_type_comboChoices.append(board)
+        board_type_comboChoices.sort()
 
         self.SetSizeHintsSz( wx.Size( -1,-1 ), wx.DefaultSize )
 
@@ -49,10 +56,18 @@ class ArduinoUploadDialog(wx.Dialog):
         self.board_type_lbl.Wrap( -1 )
         fgSizer1.Add( self.board_type_lbl, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 10 )
 
-        board_type_comboChoices = [ u"P1AM-100", u"Uno", u"Nano", u"Leonardo", u"Micro",  u"Mega", u"ESP8266 NodeMCU", u"ESP8266 D1-mini", u"ESP32", u"ESP32-S2", u"ESP32-C3", u"Nano Every", u"Nano 33 IoT", u"Nano 33 BLE", u"Nano RP2040 Connect", u"Mkr Zero", u"Mkr WiFi", u"Due (native USB port)", u"Due (programming port)", u"Zero (native USB port)", u"Zero (programming port)", u"Portenta Machine Control"]
         self.board_type_combo = wx.ComboBox( self, wx.ID_ANY, u"Uno", wx.DefaultPosition, wx.Size( 300,-1 ), board_type_comboChoices, wx.CB_READONLY )
         self.board_type_combo.SetSelection( 0 )
         fgSizer1.Add( self.board_type_combo, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
+
+        self.mode_lbl = wx.StaticText( self, wx.ID_ANY, u"Mode:", wx.DefaultPosition, wx.Size( 65,-1 ), 0)
+        self.mode_lbl.Wrap( -1 )
+        fgSizer1.Add( self.mode_lbl, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 10 )
+
+        self.check_compile = wx.CheckBox( self, wx.ID_ANY, u"Compile Only", wx.DefaultPosition, wx.DefaultSize, 0 )
+        fgSizer1.Add( self.check_compile, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
+        self.check_compile.Bind(wx.EVT_CHECKBOX, self.onUIChange)
+        
 
         self.com_port_lbl = wx.StaticText( self, wx.ID_ANY, u"COM Port:", wx.DefaultPosition, wx.Size( 65,-1 ), 0 )
         self.com_port_lbl.Wrap( -1 )
@@ -63,17 +78,16 @@ class ArduinoUploadDialog(wx.Dialog):
         self.com_port_combo.SetSelection( 0 )
         fgSizer1.Add( self.com_port_combo, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
 
-
         bSizer2.Add( fgSizer1, 0, wx.EXPAND|wx.TOP, 5 )
 
         self.m_staticline1 = wx.StaticLine( self, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.LI_HORIZONTAL )
         bSizer2.Add( self.m_staticline1, 0, wx.EXPAND|wx.LEFT|wx.RIGHT|wx.TOP, 10 )
 
-        self.check_modbus_serial = wx.CheckBox( self, wx.ID_ANY, u"Enable Modbus Serial", wx.DefaultPosition, wx.DefaultSize, 0 )
+        self.check_modbus_serial = wx.CheckBox( self, wx.ID_ANY, u"Enable Modbus RTU (Serial)", wx.DefaultPosition, wx.DefaultSize, 0 )
         bSizer2.Add( self.check_modbus_serial, 0, wx.ALL, 10 )
         self.check_modbus_serial.Bind(wx.EVT_CHECKBOX, self.onUIChange)
 
-        fgSizer2 = wx.FlexGridSizer( 0, 2, 0, 0 )
+        fgSizer2 = wx.FlexGridSizer( 0, 4, 0, 0 )
         fgSizer2.SetFlexibleDirection( wx.BOTH )
         fgSizer2.SetNonFlexibleGrowMode( wx.FLEX_GROWMODE_SPECIFIED )
 
@@ -82,21 +96,32 @@ class ArduinoUploadDialog(wx.Dialog):
         fgSizer2.Add( self.m_staticText5, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 10 )
 
         serial_iface_comboChoices = [ u"Serial", u"Serial1", u"Serial2", u"Serial3" ]
-        self.serial_iface_combo = wx.ComboBox( self, wx.ID_ANY, u"Serial", wx.DefaultPosition, wx.Size( 300,-1 ), serial_iface_comboChoices, wx.CB_READONLY )
+        self.serial_iface_combo = wx.ComboBox( self, wx.ID_ANY, u"Serial", wx.DefaultPosition, wx.Size( 108,-1 ), serial_iface_comboChoices, wx.CB_READONLY )
         self.serial_iface_combo.SetSelection( 0 )
         fgSizer2.Add( self.serial_iface_combo, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALIGN_LEFT|wx.ALL, 5 )
-        self.serial_iface_combo.Enable(False)
 
-        self.m_staticText6 = wx.StaticText( self, wx.ID_ANY, u"Baud:", wx.DefaultPosition, wx.Size( 65,-1 ), 0 )
+        self.m_staticText6 = wx.StaticText( self, wx.ID_ANY, u"Baud:", wx.DefaultPosition, wx.Size( 60,-1 ), 0 )
         self.m_staticText6.Wrap( -1 )
         fgSizer2.Add( self.m_staticText6, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 10 )
 
         baud_rate_comboChoices = [ u"9600", u"14400", u"19200", u"38400", u"57600", u"115200" ]
-        self.baud_rate_combo = wx.ComboBox( self, wx.ID_ANY, u"115200", wx.DefaultPosition, wx.Size( 300,-1 ), baud_rate_comboChoices, wx.CB_READONLY )
+        self.baud_rate_combo = wx.ComboBox( self, wx.ID_ANY, u"115200", wx.DefaultPosition, wx.Size( 108,-1 ), baud_rate_comboChoices, wx.CB_READONLY )
         self.baud_rate_combo.SetSelection( 5 )
         fgSizer2.Add( self.baud_rate_combo, 0, wx.ALL, 5 )
-        self.baud_rate_combo.Enable(False)
 
+        self.m_staticText51 = wx.StaticText( self, wx.ID_ANY, u"Slave ID:", wx.DefaultPosition, wx.Size( 65,-1 ), 0 )
+        self.m_staticText51.Wrap( -1 )
+        fgSizer2.Add( self.m_staticText51, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALIGN_LEFT|wx.LEFT, 10 )
+
+        self.slaveid_txt = wx.TextCtrl( self, wx.ID_ANY, u"0", wx.DefaultPosition, wx.Size( 105,-1 ), 0 )
+        fgSizer2.Add( self.slaveid_txt, 0, wx.ALL, 5 )
+
+        self.m_staticText61 = wx.StaticText( self, wx.ID_ANY, u"Tx Pin:", wx.DefaultPosition, wx.Size( 60,-1 ), 0 )
+        self.m_staticText61.Wrap( -1 )
+        fgSizer2.Add( self.m_staticText61, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALIGN_LEFT|wx.LEFT, 10 )
+
+        self.txpin_txt = wx.TextCtrl( self, wx.ID_ANY, u"-1", wx.DefaultPosition, wx.Size( 105,-1 ), 0 )
+        fgSizer2.Add( self.txpin_txt, 0, wx.ALL, 5 )
 
         bSizer2.Add( fgSizer2, 0, wx.EXPAND, 5 )
 
@@ -228,10 +253,21 @@ class ArduinoUploadDialog(wx.Dialog):
         if (self.check_modbus_serial.GetValue() == False):
             self.serial_iface_combo.Enable(False)
             self.baud_rate_combo.Enable(False)
+            self.slaveid_txt.Enable(False)
+            self.txpin_txt.Enable(False)
         elif (self.check_modbus_serial.GetValue() == True):
             self.serial_iface_combo.Enable(True)
             self.baud_rate_combo.Enable(True)
+            self.slaveid_txt.Enable(True)
+            self.txpin_txt.Enable(True)
 
+        if (self.check_compile.GetValue() == False):
+            self.com_port_combo.Enable(True)
+            self.upload_button.SetLabel("Upload")
+        elif (self.check_compile.GetValue() == True):
+            self.com_port_combo.Enable(False)
+            self.upload_button.SetLabel("Compile")
+        
         if (self.check_modbus_tcp.GetValue() == False):
             self.tcp_iface_combo.Enable(False)
             self.mac_txt.Enable(False)
@@ -259,60 +295,28 @@ class ArduinoUploadDialog(wx.Dialog):
         self.EndModal(wx.ID_OK)
 
     def startBuilder(self):
-        board = ''
-        if self.board_type_combo.GetValue() == u"P1AM-100":
-            board = 'arduino:samd:mkrzero-p1am'
-        elif self.board_type_combo.GetValue() == u"Uno":
-            board = 'arduino:avr:uno'
-        elif self.board_type_combo.GetValue() == u"Nano":
-            board = 'arduino:avr:nano'
-        elif self.board_type_combo.GetValue() == u"Leonardo":
-            board = 'arduino:avr:leonardo'
-        elif self.board_type_combo.GetValue() == u"Micro":
-            board = 'arduino:avr:micro'
-        elif self.board_type_combo.GetValue() == u"Nano Every":
-            board = 'arduino:megaavr:nona4809'
-        elif self.board_type_combo.GetValue() == u"Mega":
-            board = 'arduino:avr:mega'
-        elif self.board_type_combo.GetValue() == u"ESP8266 NodeMCU":
-            board = 'esp8266:esp8266:nodemcuv2'
-        elif self.board_type_combo.GetValue() == u"ESP8266 D1-mini":
-            board = 'esp8266:esp8266:d1_mini'
-        elif self.board_type_combo.GetValue() == u"ESP32":
-            board = 'esp32:esp32:esp32'
-        elif self.board_type_combo.GetValue() == u"ESP32-S2":
-            board = 'esp32:esp32:esp32s2'
-        elif self.board_type_combo.GetValue() == u"ESP32-C3":
-            board = 'esp32:esp32:esp32c3'
-        elif self.board_type_combo.GetValue() == u"Nano 33 IoT":
-            board = 'arduino:samd:nano_33_iot'
-        elif self.board_type_combo.GetValue() == u"Nano 33 BLE":
-            board = 'arduino:mbed_nano:nano33ble'
-        elif self.board_type_combo.GetValue() == u"Nano RP2040 Connect":
-            board = 'arduino:mbed_nano:nanorp2040connect'
-        elif self.board_type_combo.GetValue() == u"Mkr Zero":
-            board = 'arduino:samd:mkrzero'
-        elif self.board_type_combo.GetValue() == u"Mkr WiFi":
-            board = 'arduino:samd:mkrwifi1010'
-        elif self.board_type_combo.GetValue() == u"Due (native USB port)":
-            board = 'arduino:sam:arduino_due_x'
-        elif self.board_type_combo.GetValue() == u"Due (programming port)":
-            board = 'arduino:sam:arduino_due_x_dbg'
-        elif self.board_type_combo.GetValue() == u"Zero (native USB port)":
-            board = 'arduino:samd:arduino_zero_native'
-        elif self.board_type_combo.GetValue() == u"Zero (programming port)":
-            board = 'arduino:samd:arduino_zero_edbg'
-        elif self.board_type_combo.GetValue() == u"Portenta Machine Control":
-            board = 'arduino:mbed_portenta:envie_m7'
 
+        # Get platform and source_file from hals
+        board_type = self.board_type_combo.GetValue()
+        platform = self.hals[board_type]['platform']
+        source = self.hals[board_type]['source']
+        
         self.generateDefinitionsFile()
-        self.saveSettings()
 
-        compiler_thread = threading.Thread(target=builder.build, args=(self.plc_program, board, self.com_port_combo.GetValue(), self.output_text, self.update_subsystem))
+        port = self.com_port_combo.GetValue()
+        if (self.check_compile.GetValue() == True):
+            port = None
+        
+        compiler_thread = threading.Thread(target=builder.build, args=(self.plc_program, platform, source, port, self.output_text, self.update_subsystem))
         compiler_thread.start()
         compiler_thread.join()
         wx.CallAfter(self.upload_button.Enable, True)
-        wx.CallAfter(self.cancel_button.Enable, True)
+        wx.CallAfter(self.cancel_button.Enable, True)        
+        if (self.update_subsystem):
+            self.update_subsystem = False
+            self.last_update = time.time()
+        self.saveSettings()
+
 
     def OnUpload(self, event):
         self.upload_button.Enable(False)
@@ -326,6 +330,7 @@ class ArduinoUploadDialog(wx.Dialog):
 
         define_file += '#define MBSERIAL_IFACE ' + str(self.serial_iface_combo.GetValue()) + '\n'
         define_file += '#define MBSERIAL_BAUD ' + str(self.baud_rate_combo.GetValue()) + '\n'
+        define_file += '#define MBSERIAL_SLAVE ' + str(self.slaveid_txt.GetValue()) + '\n'
         define_file += '#define MBTCP_MAC ' + str(self.mac_txt.GetValue()) + '\n'
         define_file += '#define MBTCP_IP ' + str(self.ip_txt.GetValue()).replace('.',',') + '\n'
         define_file += '#define MBTCP_DNS ' + str(self.dns_txt.GetValue()).replace('.',',') + '\n'
@@ -337,6 +342,9 @@ class ArduinoUploadDialog(wx.Dialog):
         if (self.check_modbus_serial.GetValue() == True):
             define_file += '#define MBSERIAL\n'
             define_file += '#define MODBUS_ENABLED\n'
+        
+        if (self.txpin_txt.GetValue() != '-1'):
+            define_file += '#define MBSERIAL_TXPIN ' + str(self.txpin_txt.GetValue()) + '\n'
             
         if (self.check_modbus_tcp.GetValue() == True):
             define_file += '#define MBTCP\n'
@@ -346,12 +354,9 @@ class ArduinoUploadDialog(wx.Dialog):
             elif (self.tcp_iface_combo.GetValue() == u'WiFi'):
                 define_file += '#define MBTCP_WIFI\n'
         
-        if (self.board_type_combo.GetValue() == u"ESP8266 NodeMCU" or self.board_type_combo.GetValue() == u"ESP8266 D1-mini"):
-            define_file += '#define BOARD_ESP8266\n'
-        elif (self.board_type_combo.GetValue() == u"ESP32" or self.board_type_combo.GetValue() == u"ESP32-S2" or self.board_type_combo.GetValue() == u"ESP32-C3"):
-            define_file += '#define BOARD_ESP32\n'
-        elif (self.board_type_combo.GetValue() == u"Nano 33 IoT" or self.board_type_combo.GetValue() == u"Mkr WiFi" or self.board_type_combo.GetValue() == u"Nano RP2040 Connect"):
-            define_file += '#define BOARD_WIFININA\n'
+        # Get define from hals
+        if 'define' in self.hals[self.board_type_combo.GetValue()]:
+            define_file += '#define '+ self.hals[self.board_type_combo.GetValue()]['define'] +'\n'
         
         define_file += '\n\n//Arduino Libraries\n'
 
@@ -380,6 +385,8 @@ class ArduinoUploadDialog(wx.Dialog):
         settings['mb_serial'] = self.check_modbus_serial.GetValue()
         settings['serial_iface'] = self.serial_iface_combo.GetValue()
         settings['baud'] = self.baud_rate_combo.GetValue()
+        settings['slaveid'] = self.slaveid_txt.GetValue()
+        settings['txpin'] = self.txpin_txt.GetValue()
         settings['mb_tcp'] = self.check_modbus_tcp.GetValue()
         settings['tcp_iface'] = self.tcp_iface_combo.GetValue()
         settings['mac'] = self.mac_txt.GetValue()
@@ -401,6 +408,7 @@ class ArduinoUploadDialog(wx.Dialog):
         f.write(jsonStr)
         f.flush()
         f.close()
+
 
     def loadSettings(self):
         #read settings from disk
@@ -432,6 +440,8 @@ class ArduinoUploadDialog(wx.Dialog):
             wx.CallAfter(self.check_modbus_serial.SetValue, settings['mb_serial'])
             wx.CallAfter(self.serial_iface_combo.SetValue, settings['serial_iface'])
             wx.CallAfter(self.baud_rate_combo.SetValue, settings['baud'])
+            wx.CallAfter(self.slaveid_txt.SetValue, settings['slaveid'])
+            wx.CallAfter(self.txpin_txt.SetValue, settings['txpin'])
             wx.CallAfter(self.check_modbus_tcp.SetValue, settings['mb_tcp'])
             wx.CallAfter(self.tcp_iface_combo.SetValue, settings['tcp_iface'])
             wx.CallAfter(self.mac_txt.SetValue, settings['mac'])
@@ -443,3 +453,15 @@ class ArduinoUploadDialog(wx.Dialog):
             wx.CallAfter(self.wifi_pwd_txt.SetValue, settings['pwd'])
 
             wx.CallAfter(self.onUIChange, None)
+    
+    def loadHals(self):
+        # load hals list from json file, or construct it
+        if (os.name == 'nt'):
+            jfile = 'editor\\arduino\\examples\\Baremetal\\hals.json'
+        else:
+            jfile = 'editor/arduino/examples/Baremetal/hals.json'
+        
+        f = open(jfile, 'r')
+        jsonStr = f.read()
+        f.close()
+        self.hals = json.loads(jsonStr)

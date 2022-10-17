@@ -8,6 +8,11 @@ Copyright (C) 2014 Andre Sarmento Barbosa
 */
 #include "ModbusSerial.h"
 
+// To use CONTROLLINO RS485 interface API
+#if defined(CONTROLLINO_MAXI) || defined(CONTROLLINO_MEGA)
+#include "Controllino.h"
+#endif
+
 #ifdef MBTCP
 ModbusSerial::ModbusSerial():_server(502) {
 
@@ -37,6 +42,12 @@ bool ModbusSerial::config(HardwareSerial* port, long baud, int txPin) {
     pinMode(txPin, OUTPUT);
     digitalWrite(txPin, LOW);
   }
+
+  #if defined(CONTROLLINO_MAXI) || defined(CONTROLLINO_MEGA)
+  if (_port == &Serial3) { // RS485 serial port
+    Controllino_RS485Init();
+  }
+  #endif
 
   // Modbus states that a baud rate higher than 19200 must use a fixed 750 us
   // for inter character time out and 1.75 ms for a frame delay for baud rates
@@ -242,7 +253,7 @@ void ModbusSerial::config(uint8_t *mac, IPAddress ip, IPAddress dns, IPAddress g
     //first byte of frame = address
     byte address = frame[0];
     //Last two bytes = crc
-    u_int crc = ((frame[_len - 2] << 8) | frame[_len - 1]);
+    uint16_t crc = ((frame[_len - 2] << 8) | frame[_len - 1]);
 
     //Slave Check
     if (address != 0xFF && address != this->getSlaveId()) {
@@ -270,6 +281,12 @@ void ModbusSerial::config(uint8_t *mac, IPAddress ip, IPAddress dns, IPAddress g
       delay(1);
     }
 
+    #if defined(CONTROLLINO_MAXI) || defined(CONTROLLINO_MEGA)
+    if (_port == &Serial3) { // RS485 serial port
+      Controllino_RS485TxEnable(); // Enable RS485 chip to transmit 
+    }
+    #endif
+
     for (i = 0 ; i < _len ; i++) {
       (*_port).write(frame[i]);
     }
@@ -280,6 +297,12 @@ void ModbusSerial::config(uint8_t *mac, IPAddress ip, IPAddress dns, IPAddress g
     if (this->_txPin >= 0) {
       digitalWrite(this->_txPin, LOW);
     }
+
+    #if defined(CONTROLLINO_MAXI) || defined(CONTROLLINO_MEGA)
+    if (_port == &Serial3) { // RS485 serial port
+      Controllino_RS485RxEnable(); // Go back to receive mode after transmitted data
+    }
+    #endif
   }
 
   bool ModbusSerial::sendPDU(byte* pduframe) {
@@ -287,6 +310,12 @@ void ModbusSerial::config(uint8_t *mac, IPAddress ip, IPAddress dns, IPAddress g
       digitalWrite(this->_txPin, HIGH);
       delay(1);
     }
+
+    #if defined(CONTROLLINO_MAXI) || defined(CONTROLLINO_MEGA)
+    if (_port == &Serial3) { // RS485 serial port
+      Controllino_RS485TxEnable(); // Enable RS485 chip to transmit 
+    }
+    #endif
 
     delayMicroseconds(_t35);
 
@@ -310,6 +339,12 @@ void ModbusSerial::config(uint8_t *mac, IPAddress ip, IPAddress dns, IPAddress g
     if (this->_txPin >= 0) {
       digitalWrite(this->_txPin, LOW);
     }
+
+    #if defined(CONTROLLINO_MAXI) || defined(CONTROLLINO_MEGA)
+    if (_port == &Serial3) { // RS485 serial port
+      Controllino_RS485RxEnable(); // Go back to receive mode after transmitted data
+    }
+    #endif
 
     #ifdef DEBUG_MODE
     (*DebugPort).println("SENT Serial RESPONSE");
@@ -449,13 +484,20 @@ void ModbusSerial::config(uint8_t *mac, IPAddress ip, IPAddress dns, IPAddress g
     
     #ifdef MBSERIAL
     _len = 0;
-
+	
+	// overflow if len > 255 (len is byte)
+    if ((*_port).available() > 0xFF) {
+        (*_port).flush(); // flush data
+        return;
+    }
+    if ((*_port).available() == 0) 
+        return;
+	
     while ((*_port).available() > _len) {
-      _len = (*_port).available();
+      _len = (*_port).available(); // (len is byte)
       delayMicroseconds(_t15);
     }
 
-    if (_len == 0) return;
 
     byte i;
     _frame = (byte*) malloc(_len);
@@ -472,12 +514,14 @@ void ModbusSerial::config(uint8_t *mac, IPAddress ip, IPAddress dns, IPAddress g
     (*DebugPort).println(F("-----------------"));
     #endif
 
-    if (this->receive(_frame)) {
-      if (_reply == MB_REPLY_NORMAL)
-      this->sendPDU(_frame);
-      else
-      if (_reply == MB_REPLY_ECHO)
-      this->send(_frame);
+    if (_len > 3) { // ignore data receiver, if len <= 3
+        if (this->receive(_frame)) {
+            if (_reply == MB_REPLY_NORMAL)
+                this->sendPDU(_frame);
+            else
+                if (_reply == MB_REPLY_ECHO)
+                    this->send(_frame);
+        }
     }
 
     free(_frame);

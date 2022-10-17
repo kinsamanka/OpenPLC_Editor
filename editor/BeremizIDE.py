@@ -89,9 +89,17 @@ from IDEFrame import \
 beremiz_dir = paths.AbsDir(__file__)
 
 
+# Define OpenPLC Editor FileMenu extra items id
+[
+    ID_OPENPLCFILEMENUUPDATE
+] = [wx.NewId() for _init_coll_FileMenu_Items in range(1)]
+
+
 def Bpath(*args):
     return os.path.join(beremiz_dir, *args)
 
+def AppendMenu(parent, help, id, kind, text):
+    return parent.Append(help=help, id=id, kind=kind, text=text)
 
 MAX_RECENT_PROJECTS = 9
 
@@ -103,7 +111,7 @@ if wx.Platform == '__WXMSW__':
     }
 else:
     faces = {
-        'mono': 'Courier',
+        'mono': 'FreeMono',
         'size': 10,
     }
 
@@ -122,86 +130,87 @@ class LogPseudoFile(object):
         self.risecall = risecall
         # to prevent rapid fire on rising log panel
         self.rising_timer = 0
-        self.lock = Lock()
+        self.StackLock = Lock()
         self.YieldLock = Lock()
         self.RefreshLock = Lock()
         self.TimerAccessLock = Lock()
         self.stack = []
         self.LastRefreshTime = gettime()
         self.LastRefreshTimer = None
+        self.refreshPending = False
 
     def write(self, s, style=None):
-        if self.lock.acquire():
-            self.stack.append((s, style))
-            self.lock.release()
-            current_time = gettime()
-            self.TimerAccessLock.acquire()
-            if self.LastRefreshTimer:
+        self.StackLock.acquire()
+        self.stack.append((s, style))
+        self.StackLock.release()
+        current_time = gettime()
+        with self.TimerAccessLock:
+            if self.LastRefreshTimer is not None:
                 self.LastRefreshTimer.cancel()
                 self.LastRefreshTimer = None
-            self.TimerAccessLock.release()
-            if current_time - self.LastRefreshTime > REFRESH_PERIOD and self.RefreshLock.acquire(False):
-                self._should_write()
-            else:
-                self.TimerAccessLock.acquire()
-                self.LastRefreshTimer = Timer(REFRESH_PERIOD, self._timer_expired)
-                self.LastRefreshTimer.start()
-                self.TimerAccessLock.release()
-
-    def _timer_expired(self):
-        if self.RefreshLock.acquire(False):
+        elapsed = current_time - self.LastRefreshTime
+        if elapsed > REFRESH_PERIOD:
             self._should_write()
         else:
-            self.TimerAccessLock.acquire()
-            self.LastRefreshTimer = Timer(REFRESH_PERIOD, self._timer_expired)
-            self.LastRefreshTimer.start()
-            self.TimerAccessLock.release()
+            with self.TimerAccessLock:
+                if self.LastRefreshTimer is None:
+                    self.LastRefreshTimer = Timer(REFRESH_PERIOD - elapsed, self._timer_expired)
+                    self.LastRefreshTimer.start()
+
+    def _timer_expired(self):
+        self._should_write()
+        with self.TimerAccessLock:
+            self.LastRefreshTimer = None
 
     def _should_write(self):
-        app = wx.GetApp()
-        if app is not None:
-            wx.CallAfter(self._write)
-
         if MainThread == currentThread().ident:
+            app = wx.GetApp()
             if app is not None:
+                self._write()
                 if self.YieldLock.acquire(0):
                     app.Yield()
                     self.YieldLock.release()
+        else:
+            with self.RefreshLock:
+                if not self.refreshPending:
+                    self.refreshPending = True
+                    wx.CallAfter(self._write)
 
     def _write(self):
         if self.output:
-            self.output.Freeze()
-            self.lock.acquire()
-            for s, style in self.stack:
-                if style is None:
-                    style = self.black_white
-                if style != self.black_white:
-                    self.output.StartStyling(self.output.GetLength(), 0xff)
+            with self.RefreshLock:
+                self.output.Freeze()
+                self.output.AnnotationClearAll()
+                self.StackLock.acquire()
+                for s, style in self.stack:
+                    if style is None:
+                        style = self.black_white
+                    if style != self.black_white:
+                        self.output.StartStyling(self.output.GetLength(), 0xff)
 
-                # Temporary deactivate read only mode on StyledTextCtrl for
-                # adding text. It seems that text modifications, even
-                # programmatically, are disabled in StyledTextCtrl when read
-                # only is active
-                start_pos = self.output.GetLength()
-                self.output.SetReadOnly(False)
-                self.output.AppendText(s)
-                self.output.SetReadOnly(True)
-                text_len = self.output.GetLength() - start_pos
+                    # Temporary deactivate read only mode on StyledTextCtrl for
+                    # adding text. It seems that text modifications, even
+                    # programmatically, are disabled in StyledTextCtrl when read
+                    # only is active
+                    start_pos = self.output.GetLength()
+                    self.output.SetReadOnly(False)
+                    self.output.AppendText(s)
+                    self.output.SetReadOnly(True)
+                    text_len = self.output.GetLength() - start_pos
 
-                if style != self.black_white:
-                    self.output.SetStyling(text_len, style)
-            self.stack = []
-            self.lock.release()
-            self.output.Thaw()
-            self.LastRefreshTime = gettime()
-            try:
-                self.RefreshLock.release()
-            except Exception:
-                pass
-            newtime = time.time()
-            if newtime - self.rising_timer > 1:
-                self.risecall(self.output)
-            self.rising_timer = newtime
+                    if style != self.black_white:
+                        self.output.SetStyling(text_len, style)
+                self.stack = []
+                self.StackLock.release()
+                self.output.ScrollToEnd()
+                self.output.Thaw()
+                self.LastRefreshTime = gettime()
+                newtime = time.time()
+                if newtime - self.rising_timer > 1:
+                    self.risecall(self.output)
+                self.rising_timer = newtime
+                self.refreshPending = False
+
 
     def write_warning(self, s):
         self.write(s, self.red_white)
@@ -220,6 +229,16 @@ class LogPseudoFile(object):
     def isatty(self):
         return False
 
+    def progress(self, text):
+        l = max(self.output.GetLineCount()-2, 0)
+        self.output.AnnotationSetText(l, text)
+        self.output.AnnotationSetVisible(wx.stc.STC_ANNOTATION_BOXED)
+        self.output.AnnotationSetStyle(l, self.black_white)
+        if self.YieldLock.acquire(0):
+            app = wx.GetApp()
+            app.Yield()
+            self.YieldLock.release()
+
 
 ID_FILEMENURECENTPROJECTS = wx.NewId()
 
@@ -229,6 +248,7 @@ class Beremiz(IDEFrame):
     def _init_utils(self):
         self.ConfNodeMenu = wx.Menu(title='')
         self.RecentProjectsMenu = wx.Menu(title='')
+        self.TutorialsProjectsMenu = wx.Menu(title='')
 
         IDEFrame._init_utils(self)
 
@@ -238,6 +258,28 @@ class Beremiz(IDEFrame):
         AppendMenu(parent, help='', id=wx.ID_OPEN,
                    kind=wx.ITEM_NORMAL, text=_(u'Open') + '\tCTRL+O')
         parent.AppendMenu(ID_FILEMENURECENTPROJECTS, _("&Recent Projects"), self.RecentProjectsMenu)
+        parent.AppendSeparator()
+        parent.AppendMenu(wx.ID_ANY, _("&Tutorials and Examples"), self.TutorialsProjectsMenu)
+
+        examples_dir = Bpath("examples")
+        project_list = sorted(os.listdir(examples_dir))
+
+        for idx, dirname  in enumerate(project_list):
+            text = u'&%d: %s' % (idx + 1, dirname)
+
+            item = self.TutorialsProjectsMenu.Append(wx.ID_ANY, text, '')
+
+            projectpath = os.path.join(examples_dir, dirname)
+
+            def OpenExemple(event, projectpath=projectpath):
+                if self.CTR is not None and not self.CheckSaveBeforeClosing():
+                    return
+
+                self.OpenProject(projectpath)
+                if not self.CTR.CheckProjectPathPerm():
+                    self.ResetView()
+
+            self.Bind(wx.EVT_MENU, OpenExemple, item)
         parent.AppendSeparator()
         AppendMenu(parent, help='', id=wx.ID_SAVE,
                    kind=wx.ITEM_NORMAL, text=_(u'Save') + '\tCTRL+S')
@@ -255,6 +297,10 @@ class Beremiz(IDEFrame):
         AppendMenu(parent, help='', id=wx.ID_PRINT,
                    kind=wx.ITEM_NORMAL, text=_(u'Print') + '\tCTRL+P')
         parent.AppendSeparator()
+        id_update = wx.NewId()
+        AppendMenu(parent, help='', id=ID_OPENPLCFILEMENUUPDATE,
+                   kind=wx.ITEM_NORMAL, text=_(u'Check for updates...') + '\tCTRL+U')
+        parent.AppendSeparator()
         AppendMenu(parent, help='', id=wx.ID_EXIT,
                    kind=wx.ITEM_NORMAL, text=_(u'Quit') + '\tCTRL+Q')
 
@@ -267,6 +313,7 @@ class Beremiz(IDEFrame):
         self.Bind(wx.EVT_MENU, self.OnPageSetupMenu, id=wx.ID_PAGE_SETUP)
         self.Bind(wx.EVT_MENU, self.OnPreviewMenu, id=wx.ID_PREVIEW)
         self.Bind(wx.EVT_MENU, self.OnPrintMenu, id=wx.ID_PRINT)
+        self.Bind(wx.EVT_MENU, self.OnUpdateMenu, id=ID_OPENPLCFILEMENUUPDATE)
         self.Bind(wx.EVT_MENU, self.OnQuitMenu, id=wx.ID_EXIT)
 
         self.AddToMenuToolBar([(wx.ID_NEW, "new", _(u'New'), None),
@@ -325,6 +372,7 @@ class Beremiz(IDEFrame):
                                  ("Run",      wx.WXK_F5),
                                  ("Transfer", wx.WXK_F6),
                                  ("Connect",  wx.WXK_F7),
+                                 ("Clean",    wx.WXK_F9),
                                  ("Build",    wx.WXK_F11)]:
             def OnMethodGen(obj, meth):
                 def OnMethod(evt):
@@ -463,8 +511,6 @@ class Beremiz(IDEFrame):
         if self.EnableDebug:
             self.DebugVariablePanel.SetDataProducer(self.CTR)
 
-        self.Bind(wx.EVT_CLOSE, self.OnCloseFrame)
-
         self._Refresh(TITLE, EDITORTOOLBAR, FILEMENU, EDITMENU, DISPLAYMENU)
         self.RefreshAll()
         self.LogConsole.SetFocus()
@@ -485,6 +531,7 @@ class Beremiz(IDEFrame):
             self.local_runtime_tmpdir = tempfile.mkdtemp()
             # choose an arbitrary random port for runtime
             self.runtime_port = int(random.random() * 1000) + 61131
+            self.Log.write(_("Starting local runtime...\n"))
             # launch local runtime
             self.local_runtime = ProcessLogger(
                 self.Log,
@@ -616,6 +663,7 @@ class Beremiz(IDEFrame):
         if self.CTR is None or self.CheckSaveBeforeClosing(_("Close Application")):
             if self.CTR is not None:
                 self.CTR.KillDebugThread()
+                self.CTR._Disconnect()
             self.KillLocalRuntime()
 
             self.SaveLastState()
@@ -629,6 +677,8 @@ class Beremiz(IDEFrame):
 
     def OnCloseFrame(self, event):
         if self.TryCloseFrame():
+            self.LogConsole.Disconnect(-1, -1, wx.wxEVT_KILL_FOCUS)
+            super(Beremiz, self).OnCloseFrame(event)
             event.Skip()
         else:
             # prevent event to continue, i.e. cancel closing

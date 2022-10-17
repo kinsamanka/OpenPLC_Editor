@@ -139,6 +139,22 @@ typedef struct {
   __DECLARE_VAR(SINT,DUMMY)
 
 } P1_16TR;
+
+// P1_04AD
+// Data part
+typedef struct {
+  // FB Interface - IN, OUT, IN_OUT variables
+  __DECLARE_VAR(BOOL,EN)
+  __DECLARE_VAR(BOOL,ENO)
+  __DECLARE_VAR(SINT,SLOT)
+  __DECLARE_VAR(UINT,I1)
+  __DECLARE_VAR(UINT,I2)
+  __DECLARE_VAR(UINT,I3)
+  __DECLARE_VAR(UINT,I4)
+
+  // FB private variables - TEMP, private and located variables
+
+} P1_04AD;
 /************************************************************************
  *                      END OF P1AM LIB BLOCKS                          *
 ************************************************************************/
@@ -150,6 +166,8 @@ typedef struct {
 uint8_t p1am_init();
 void p1am_writeDiscrete(uint32_t, uint8_t, uint8_t);
 uint32_t p1am_readDiscrete(uint8_t, uint8_t);
+uint16_t p1am_readAnalog(uint8_t, uint8_t);
+void print_msg(char *);
 
 static void P1AM_INIT_init__(P1AM_INIT *data__, BOOL retain) {
   __INIT_VAR(data__->EN,__BOOL_LITERAL(TRUE),retain)
@@ -410,22 +428,22 @@ static void P1_16TR_body__(P1_16TR *data__) {
   else {
     __SET_VAR(data__->,ENO,,__BOOL_LITERAL(TRUE));
   }
-  uint8_t output_byte = __GET_VAR(data__->O8) << 15 | 
-                        __GET_VAR(data__->O7) << 14 | 
-                        __GET_VAR(data__->O6) << 13 | 
-                        __GET_VAR(data__->O5) << 12 | 
-                        __GET_VAR(data__->O4) << 11 | 
-                        __GET_VAR(data__->O3) << 10 | 
-                        __GET_VAR(data__->O2) << 9 |
-                        __GET_VAR(data__->O2) << 8 |
-                        __GET_VAR(data__->O8) << 7 | 
-                        __GET_VAR(data__->O7) << 6 | 
-                        __GET_VAR(data__->O6) << 5 | 
-                        __GET_VAR(data__->O5) << 4 | 
-                        __GET_VAR(data__->O4) << 3 | 
-                        __GET_VAR(data__->O3) << 2 | 
-                        __GET_VAR(data__->O2) << 1 | 
-                        __GET_VAR(data__->O1);
+  uint16_t output_byte = __GET_VAR(data__->O16) << 15 | 
+                         __GET_VAR(data__->O15) << 14 | 
+                         __GET_VAR(data__->O14) << 13 | 
+                         __GET_VAR(data__->O13) << 12 | 
+                         __GET_VAR(data__->O12) << 11 | 
+                         __GET_VAR(data__->O11) << 10 | 
+                         __GET_VAR(data__->O10) << 9 |
+                         __GET_VAR(data__->O9) << 8 |
+                         __GET_VAR(data__->O8) << 7 | 
+                         __GET_VAR(data__->O7) << 6 | 
+                         __GET_VAR(data__->O6) << 5 | 
+                         __GET_VAR(data__->O5) << 4 | 
+                         __GET_VAR(data__->O4) << 3 | 
+                         __GET_VAR(data__->O3) << 2 | 
+                         __GET_VAR(data__->O2) << 1 | 
+                         __GET_VAR(data__->O1);
   p1am_writeDiscrete(output_byte, __GET_VAR(data__->SLOT), 0);
 
   goto __end;
@@ -433,6 +451,43 @@ static void P1_16TR_body__(P1_16TR *data__) {
 __end:
   return;
 } // P1_16TR_body__()
+
+
+static void P1_04AD_init__(P1_04AD *data__, BOOL retain) {
+  __INIT_VAR(data__->EN,__BOOL_LITERAL(TRUE),retain)
+  __INIT_VAR(data__->ENO,__BOOL_LITERAL(TRUE),retain)
+  __INIT_VAR(data__->SLOT,0,retain)
+  __INIT_VAR(data__->I1,0,retain)
+  __INIT_VAR(data__->I2,0,retain)
+  __INIT_VAR(data__->I3,0,retain)
+  __INIT_VAR(data__->I4,0,retain)
+}
+
+// Code part
+static void P1_04AD_body__(P1_04AD *data__) {
+  // Control execution
+  if (!__GET_VAR(data__->EN)) {
+    __SET_VAR(data__->,ENO,,__BOOL_LITERAL(FALSE));
+    return;
+  }
+  else {
+    __SET_VAR(data__->,ENO,,__BOOL_LITERAL(TRUE));
+  }
+  char msg[100];
+  uint16_t input_byte = p1am_readAnalog(__GET_VAR(data__->SLOT), 1);
+  __SET_VAR(data__->,I1,,input_byte);
+  input_byte = p1am_readAnalog(__GET_VAR(data__->SLOT), 2);
+  __SET_VAR(data__->,I2,,input_byte);
+  input_byte = p1am_readAnalog(__GET_VAR(data__->SLOT), 3);
+  __SET_VAR(data__->,I3,,input_byte);
+  input_byte = p1am_readAnalog(__GET_VAR(data__->SLOT), 4);
+  __SET_VAR(data__->,I4,,input_byte);
+
+  goto __end;
+
+__end:
+  return;
+} // P1_08N_body__()
 /************************************************************************
  *                      END OF P1AM LIB BLOCKS                          *
 ************************************************************************/
